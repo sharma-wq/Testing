@@ -1,59 +1,54 @@
-# Data Diode Gateway — Real Linux Networking Proof (pre-hardware test)
+# Stage 5 – HTTPS + SFTP live kernel lab (pre-hardware)
 
-**Objective:** Go beyond Windows Python mocks. Exercise **actual Linux kernel** network devices, nftables rule enforcement, sockets and transfer integrity before buying a Raspberry Pi.
+This is a **test-only** lab for the Data Diode Gateway's fifth development stage. It builds on the Stage 4 namespace/nftables proof. It uses a **real certificate-validated HTTPS/TLS source** and an **actual OpenSSH SFTP receiver with key-based authentication**, separated by a Linux gateway namespace. It verifies 128 KiB of data, its SHA-256 digests, UID- and port-scoped `nftables` rules, interface switching and a deliberate both-NICs-UP fault.
 
-## What it does
-
-Creates **three isolated Linux network namespaces** inside an Ubuntu VM:
-
-```
-[Internet source namespace] --veth-- eth0 [Gateway namespace] eth1 --veth-- [Local receiver namespace]
-  10.11.0.10:443                 10.11.0.20       10.22.0.1       10.22.0.10:22
-```
-
-- FETCH: `eth0 UP`, `eth1 DOWN`; only UID **21001** can connect to source **10.11.0.10:443**.
-- HOLD: both DOWN; downloaded bytes remain in disk-backed staging directory.
-- DELIVER: `eth0 DOWN`, `eth1 UP`; only UID **21002** can connect to receiver **10.22.0.10:22**.
-- FINISH: both DOWN, no temporary firewall rules; matching received SHA-256.
-- Negative checks: wrong UID, wrong port, no route, firewall-default-deny, deliberate both-links-UP fault + fail-close.
-
-**Important:** This lab uses **plain HTTP on TCP ports 443 and 22 solely to test packet policy**. It does **NOT** test TLS/HTTPS, SSH/SFTP key authentication, the actual Raspberry Pi controller, a real USB disk, reboot handling, or physical hardware isolation. The protocol service/port names are deliberately not presented as HTTPS/SSH implementations. Real security deployment still requires those separate acceptance tests.
+**Not:** a Raspberry Pi production installer; a hardware-enforced data diode; a test of real removable 4 TB media, physical power interruption, real Internet sources, or deployed device services.
 
 ## Requirements
 
-1. Windows computer with **an Ubuntu Server/Desktop VM** (VMware Workstation, VirtualBox, etc.). Use Ubuntu 24.04 LTS or equivalent.
-2. Linux VM with `sudo` privileges. No extra virtual NICs are needed; namespaces provide the virtual test wiring.
-3. Run **inside the Ubuntu VM terminal**, not directly in Windows PowerShell or Windows VS Code terminal.
-4. Installer only runs **before** testing, to install packages. The lab itself creates no public listeners and does not modify the VM's main interface, routing or firewall.
-
-## Setup on Ubuntu
-
-Copy the extracted `Data_Diode_Real_Linux_Proof` folder to the Ubuntu VM, then:
+Disposable Ubuntu/Killercoda environment with root privileges, network namespaces and nftables support (you already successfully completed Stage 4 in such an environment). Internet is required only to install packages; the live file transfers remain inside private network namespaces. Execute only in a **throwaway test VM/playground**.
 
 ```bash
-cd ~/Data_Diode_Real_Linux_Proof
 sudo apt update
-sudo apt install -y iproute2 nftables python3 util-linux
-bash -n run_kernel_lab.sh
-python3 -m py_compile lab_client.py lab_endpoint.py
-sudo bash run_kernel_lab.sh
+sudo apt install -y iproute2 nftables python3 openssl openssh-client openssh-server util-linux passwd unzip
 ```
 
-Expected final lines:
+## Upload and run
+
+Download the ZIP from ChatGPT, upload it into the existing GitHub `Testing` repository (or another file transfer mechanism into the online Ubuntu terminal). Then clone/pull the repo in Killercoda. Keep the test files outside `/root` so the restricted `fetchsvc`/`sendsvc` identities can read Python scripts:
+
+```bash
+# After transferring the ZIP to the online Ubuntu environment:
+mkdir -p /tmp/stage5-files
+unzip -o Data_Diode_Stage5_HTTPS_SFTP_Lab.zip -d /tmp/stage5-files
+cd /tmp/stage5-files/Data_Diode_Stage5_HTTPS_SFTP_Lab
+bash -n run_secure_lab.sh
+python3 -m py_compile https_source.py secure_client.py
+sudo bash run_secure_lab.sh
+```
+
+When the ZIP is under your clone, use `find ~/Testing -name 'Data_Diode_Stage5_HTTPS_SFTP_Lab.zip'` to identify its location; pass that absolute path to `unzip`. An earlier GitHub repo had a nested `Testing/Testing` directory, so do not assume the ZIP is in the first directory.
+
+## Expected outputs
+
+The script prints `[1/8]` to `[8/8]`. Look for:
 
 ```text
-FAULT DETECTED (intentional): both links UP -> fail-closed
-Interfaces: eth0=DOWN eth1=DOWN (expected DOWN/DOWN)
-PASS: Live Linux-kernel isolation, UID/port firewall checks, staged file transfer and fail-close demo
-Evidence retained in: .../lab-results/YYYYMMDD-HHMMSS-PID
+[4/8] FETCH ...
+HTTPS VERIFIED: TLS + hostname + trusted certificate; bytes: 131072
+[5/8] HOLD ...
+[6/8] DELIVER ...
+[7/8] FINISH ...
+[8/8] ... both NICs UP -> closed
+PASS: Stage 5, REAL HTTPS verification + OpenSSH SFTP + firewall + staged SHA-256
 ```
 
-Logs, source file, staged file, receiver file and SHA-256 evidence are retained under `lab-results/`. Network namespaces are deleted automatically on exit. `sudo` ownership may require `sudo` to read those artifacts.
+The script creates a temporary unprivileged SSH account for the receiver and removes it at exit. It also removes temporary private keys after the run, keeping public logs and hash evidence under `/tmp/diode-stage5-PID`. It does not change the host's physical network interfaces or host `nftables` firewall. The OpenSSH server binds only to `10.22.0.10:22` inside an isolated network namespace. If the account cannot be created in your playground, use a disposable Ubuntu VM with sufficient privileges.
 
-## Evaluation / acceptance boundary
+## Design and proof boundaries
 
-A passed lab supports feasibility of **store-and-forward software-controlled isolation** using the real Linux kernel. It **cannot** prove a security-grade data diode. The program can turn both virtual NICs UP (the injected fault demonstrates this), so an independent hardware mechanism is needed if physical one-way enforcement is required.
+**What is actually tested:** TLS handshake, certificate trust, hostname verification, HTTPS response/body integrity; OpenSSH host-key pinning, SSH public-key authentication, SFTP upload; source/receiver file hash equality; disallowed UID and port blocks while their target services exist; both-interface shutdown between phases.
 
-The Raspberry Pi-specific installer, startup services, real HTTPS/SFTP, USB storage, watchdog, rollback, threat model and power-loss behavior **remain unvalidated** by this lab. Do not infer those components passed because the lab passes.
+**What remains:** Tests against the actual Raspberry Pi Python controller, actual Pi NICs and USB disk, durable application policy after a crash/power loss, live network threat model, malicious-content screening, runtime protocol compatibility and security review. Software interface controls alone are **not a physical one-way data diode**.
 
-Do **not** run this proof script on a production router or shared Linux host. Use a disposable Ubuntu VM. The test servers use elevated service context because they bind low-numbered test ports; they only bind IP addresses in disposable network namespaces.
+If Stage 5 fails, copy the last 20 terminal lines plus `/tmp/diode-stage5-*/sshd.log` or `https.log`; do not share the private keys.
